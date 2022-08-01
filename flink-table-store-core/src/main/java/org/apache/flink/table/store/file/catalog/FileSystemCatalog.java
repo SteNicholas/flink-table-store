@@ -22,15 +22,19 @@ import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.file.utils.FileStorePathFactory;
+import org.apache.flink.table.store.table.FileStoreTable;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.utils.FileUtils.safelyListFileStatus;
 
@@ -171,6 +175,55 @@ public class FileSystemCatalog extends AbstractCatalog {
             throw new TableNotExistException(tablePath);
         }
         uncheck(() -> new SchemaManager(getTableLocation(tablePath)).commitChanges(changes));
+    }
+
+    @Override
+    public List<String> listPartitions(ObjectPath tablePath) throws TableNotExistException {
+        FileStoreTable storeTable = getTable(tablePath);
+        TableSchema tableSchema = storeTable.schema();
+        CoreOptions coreOptions = new CoreOptions(tableSchema.options());
+        FileStorePathFactory pathFactory =
+                new FileStorePathFactory(
+                        coreOptions.path(),
+                        tableSchema.logicalPartitionType(),
+                        coreOptions.partitionDefaultName(),
+                        coreOptions.fileFormat().getFormatIdentifier());
+        return storeTable.newScan().plan().splits.stream()
+                .map(s -> pathFactory.getPartitionString(s.partition()))
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<String> listPartitions(ObjectPath tablePath, String partition) throws TableNotExistException {
+        FileStoreTable storeTable = getTable(tablePath);
+        TableSchema tableSchema = storeTable.schema();
+        CoreOptions coreOptions = new CoreOptions(tableSchema.options());
+        FileStorePathFactory pathFactory =
+                new FileStorePathFactory(
+                        coreOptions.path(),
+                        tableSchema.logicalPartitionType(),
+                        coreOptions.partitionDefaultName(),
+                        coreOptions.fileFormat().getFormatIdentifier());
+        return storeTable.newScan().plan().splits.stream()
+                .map(s -> pathFactory.getPartitionString(s.partition()))
+                .filter(p->p.equals(partition))
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public void dropPartition(ObjectPath tablePath, String partition, boolean ignoreIfNotExists)
+            throws PartitionNotExistException {
+        if (partitionExists(tablePath, partition)) {
+            uncheck(
+                    () -> {
+                        fs.delete(new Path(partition), true);
+                        FileStoreTable storeTable = getTable(tablePath);
+                        return new SchemaManager(storeTable.location())
+                                .commitNewVersion(storeTable.schema().toUpdateSchema());
+                    });
+        } else if (!ignoreIfNotExists) {
+            throw new PartitionNotExistException(tablePath, partition);
+        }
     }
 
     private static <T> T uncheck(Callable<T> callable) {

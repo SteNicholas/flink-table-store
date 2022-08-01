@@ -262,6 +262,37 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public List<String> listPartitions(ObjectPath tablePath) throws TableNotExistException {
+        if (isTableStoreTableNotExisted(tablePath)) {
+            throw new TableNotExistException(tablePath);
+        }
+        try {
+            return client
+                    .listPartitionNames(
+                            tablePath.getDatabaseName(), tablePath.getObjectName(), (short) -1);
+        } catch (TException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public void dropPartition(ObjectPath tablePath, String partition, boolean ignoreIfNotExists) throws PartitionNotExistException {
+        try {
+            client.dropPartition(
+                    tablePath.getDatabaseName(),
+                    tablePath.getObjectName(),
+                    partition,
+                    true);
+        } catch (NoSuchObjectException e) {
+            if (!ignoreIfNotExists) {
+                throw new PartitionNotExistException(tablePath, partition, e);
+            }
+        } catch (TException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
     public void close() {
         client.close();
     }

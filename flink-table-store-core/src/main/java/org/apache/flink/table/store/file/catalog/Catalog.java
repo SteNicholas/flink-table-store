@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -42,6 +43,8 @@ public interface Catalog extends AutoCloseable {
      * object store.
      */
     Optional<CatalogLock.Factory> lockFactory();
+
+    // ------ databases ------
 
     /**
      * Get the names of all databases in this catalog.
@@ -83,6 +86,8 @@ public interface Catalog extends AutoCloseable {
      */
     void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException;
+
+    // ------ tables ------
 
     /**
      * Get names of all tables under this database. An empty list is returned if none exists.
@@ -163,6 +168,80 @@ public interface Catalog extends AutoCloseable {
      */
     void alterTable(ObjectPath tablePath, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException;
+
+    // ------ partitions ------
+
+    /**
+     * Get partition string of all partitions of the table.
+     *
+     * @param tablePath path of the table
+     * @return a list of partition string of the table
+     * @throws TableNotExistException thrown if the table does not exist in the catalog
+     */
+    List<String> listPartitions(ObjectPath tablePath) throws TableNotExistException;
+
+    /**
+     * Get partition string of all partitions that is under the given partition string in the table.
+     *
+     * @param tablePath path of the table
+     * @param partition the partition string to list
+     * @return a list of partition string that is under the given partition string in the table
+     * @throws TableNotExistException thrown if the table does not exist in the catalog
+     */
+    List<String> listPartitions(ObjectPath tablePath, String partition)
+            throws TableNotExistException;
+
+    /**
+     * Get partition string of partitions by expression filters in the table.
+     *
+     * <p>NOTE: For FieldReferenceExpression, the field index is based on schema of this table
+     * instead of partition columns only.
+     *
+     * <p>The passed in predicates have been translated in conjunctive form.
+     *
+     * <p>If catalog does not support this interface at present, throw an {@link
+     * UnsupportedOperationException} directly. If the catalog does not have a valid filter, throw
+     * the {@link UnsupportedOperationException} directly. Planner will fallback to get all
+     * partitions and filter by itself.
+     *
+     * @param tablePath path of the table
+     * @param filters filters to push down filter to catalog
+     * @return a list of partition string that is under the given partition string in the table
+     * @throws TableNotExistException thrown if the table does not exist in the catalog
+     */
+    List<String> listPartitionsByFilter(ObjectPath tablePath, List<Expression> filters)
+            throws TableNotExistException;
+
+    /**
+     * Get a partition of the given table. The given partition string keys and values need to be
+     * matched exactly for a result.
+     *
+     * @param tablePath path of the table
+     * @param partition partition string of partition to get
+     * @return the requested partition
+     * @throws PartitionNotExistException thrown if the partition doesn't exist
+     */
+    String getPartition(ObjectPath tablePath, String partition) throws PartitionNotExistException;
+
+    /**
+     * Check whether a partition exists or not.
+     *
+     * @param tablePath path of the table
+     * @param partition partition string of the partition to check
+     */
+    boolean partitionExists(ObjectPath tablePath, String partition);
+
+    /**
+     * Drop a partition.
+     *
+     * @param tablePath path of the table.
+     * @param partition partition string of the partition to drop
+     * @param ignoreIfNotExists flag to specify behavior if the database does not exist: if set to
+     *     false, throw an exception, if set to true, nothing happens.
+     * @throws PartitionNotExistException thrown if the target partition does not exist
+     */
+    void dropPartition(ObjectPath tablePath, String partition, boolean ignoreIfNotExists)
+            throws PartitionNotExistException;
 
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {
@@ -262,6 +341,30 @@ public interface Catalog extends AutoCloseable {
         }
 
         public ObjectPath tablePath() {
+            return tablePath;
+        }
+    }
+
+    /**
+     * Exception for operation on a partition that doesn't exist. The cause includes non-existent
+     * table, non-partitioned table, invalid partition spec, etc.
+     */
+    class PartitionNotExistException extends Exception {
+
+        private static final String MSG = "Partition %s of table %s does not exist.";
+
+        private final ObjectPath tablePath;
+
+        public PartitionNotExistException(ObjectPath tablePath, String partition) {
+            this(tablePath, partition, null);
+        }
+
+        public PartitionNotExistException(ObjectPath tablePath, String partition, Throwable cause) {
+            super(String.format(MSG, partition, tablePath.getFullName()), cause);
+            this.tablePath = tablePath;
+        }
+
+        public ObjectPath getTablePath() {
             return tablePath;
         }
     }
