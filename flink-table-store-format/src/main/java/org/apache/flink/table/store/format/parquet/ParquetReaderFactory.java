@@ -40,6 +40,8 @@ import org.apache.flink.table.store.utils.Pool;
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
+import org.apache.parquet.filter2.compat.FilterCompat;
+import org.apache.parquet.filter2.predicate.FilterPredicate;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetInputFormat;
 import org.apache.parquet.schema.GroupType;
@@ -100,6 +102,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         ParquetReadOptions.Builder builder =
                 ParquetReadOptions.builder().withRange(splitOffset, splitOffset + splitLength);
         setReadOptions(builder);
+
+        builder.withRecordFilter(FilterCompat.get(new FilterPredicate() {
+            @Override
+            public <R> R accept(Visitor<R> visitor) {
+                return null;
+            }
+        }))
 
         ParquetFileReader reader =
                 new ParquetFileReader(ParquetInputFile.fromPath(fileIO, filePath), builder.build());
